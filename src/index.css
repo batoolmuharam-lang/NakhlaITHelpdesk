@@ -695,3 +695,48 @@ td:first-child strong { font-size: 12px; }
   .draft-modal-actions { padding: 13px 17px; }
   .draft-confirmation { padding: 34px 22px 27px; }
 }
+
+/* Live chat: email field, errors, typing indicator, diagnostics */
+.email-field { max-width: 690px; margin: 0 auto 12px; display: grid; gap: 5px; text-align: start; }
+.conversation .email-field { max-width: none; margin: 10px 0 8px 42px; }
+.email-field label { color: var(--forest); font-size: 9px; font-weight: 800; }
+.email-field input { min-height: 38px; padding: 0 12px; border: 1px solid #dfe7e3; border-radius: 11px; background: white; color: var(--ink); font-size: 11px; outline: 0; }
+.email-field input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(22,121,101,.12); }
+.email-field input[aria-invalid="true"] { border-color: #d28a72; }
+.email-field small { color: var(--muted); font-size: 8px; }
+.email-field small.invalid { color: #a2523a; font-weight: 700; }
+.chat-error { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0 12px 42px; padding: 12px 14px; border: 1px solid #e5c8bc; border-radius: 12px; background: #fff8f5; color: #8d4a34; font-size: 10px; line-height: 1.6; }
+.assistant-welcome .chat-error { max-width: 690px; margin: 12px auto 0; }
+.chat-error > span, .chat-error > div { flex: 1; min-width: 180px; }
+.chat-error button { border: 0; background: transparent; color: var(--teal); font-size: 9px; font-weight: 800; }
+.chat-error button:disabled { opacity: .5; }
+.modal-error { margin: 14px 24px 0; }
+.message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.typing-indicator { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.typing-indicator i { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); opacity: .35; animation: typing-dot 1s infinite ease-in-out; }
+.typing-indicator i:nth-child(2) { animation-delay: .15s; }
+.typing-indicator i:nth-child(3) { animation-delay: .3s; }
+.typing-indicator span { margin-inline-start: 6px; }
+@keyframes typing-dot { 0%, 100% { opacity: .3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+.send-button:disabled, .approve-button:disabled, .reject-button:disabled, .primary-button:disabled, .text-button:disabled, .suggestion-card:disabled, .secondary-button:disabled { opacity: .55; cursor: not-allowed; }
+.draft-bullets { margin: 0; padding-inline-start: 16px; color: #52625e; font-size: 9px; line-height: 1.7; }
+.draft-confirmation .diag-data { text-align: start; margin: 14px 0; }
+.diagnostics-card .card-title { margin-bottom: 4px; }
+.diag-hint { margin: 0 0 10px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.diag-section { border-top: 1px solid var(--line); padding: 9px 0; }
+.diag-section summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: var(--forest); font-size: 10px; font-weight: 800; }
+.diag-section summary span { min-width: 18px; padding: 1px 6px; border-radius: 99px; background: var(--mint); color: var(--teal); font-size: 8px; text-align: center; }
+.diag-empty { margin: 8px 0 0; color: var(--muted); font-size: 9px; }
+.diag-list { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.diag-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: #fbfcfa; font-size: 9px; color: var(--ink); }
+.diag-list li strong { color: var(--forest); }
+.tool-call .tool-status { margin-inline-start: auto; padding: 1px 7px; border-radius: 99px; font-size: 8px; font-weight: 800; }
+.tool-call.ok .tool-status { background: var(--mint); color: var(--teal); }
+.tool-call.fail { border-color: #e5c8bc; background: #fff8f5; }
+.tool-call.fail .tool-status { background: #f9e0d5; color: #a2523a; }
+.tool-call.unknown .tool-status { background: #eef1ef; color: var(--muted); }
+.tool-time { color: var(--muted); font-size: 8px; }
+.diag-data { max-height: 220px; margin: 8px 0 0; padding: 9px; overflow: auto; border-radius: 9px; background: #f3f6f4; color: #31453f; font-size: 9px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }
+@media (max-width: 720px) {
+  .conversation .email-field, .chat-error { margin-inline-start: 0; }
+}

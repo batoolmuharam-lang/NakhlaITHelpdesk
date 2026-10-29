@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { LocalizedContent } from "./i18n"
+import { extractDraft, findTicketId, isEmailValid } from "./api"
+import { chatCopy } from "./chatCopy"
+import DiagnosticsPanel, { DataBlock } from "./DiagnosticsPanel"
+import { useHelpdeskChat, type HelpdeskChat } from "./useHelpdeskChat"
+import type { Language } from "./types"
 
-type Language = "en" | "ar" | "he"
 type Role = "employee" | "support" | "admin"
 type View = "chat" | "tickets" | "ticket" | "support" | "admin" | "users" | "reports"
 
@@ -18,7 +22,7 @@ const copy = {
     admin: "Domain Admin",
     adminDesc: "Manage operations, users, and performance.",
     continue: "Continue to workspace",
-    prototype: "Frontend prototype — no live system connection",
+    prototype: "Employee AI chat connects to the helpdesk backend · other dashboards show sample data",
     overview: "Overview",
     aiAssistant: "AI Assistant",
     myTickets: "My Tickets",
@@ -44,7 +48,7 @@ const copy = {
     admin: "مدير النطاق",
     adminDesc: "أدِر العمليات والمستخدمين والأداء.",
     continue: "الدخول إلى مساحة العمل",
-    prototype: "نموذج واجهة أمامية — غير متصل بنظام فعلي",
+    prototype: "محادثة الموظف الذكية متصلة بخادم الدعم · لوحات المعلومات الأخرى تعرض بيانات تجريبية",
     overview: "نظرة عامة",
     aiAssistant: "المساعد الذكي",
     myTickets: "تذاكري",
@@ -70,7 +74,7 @@ const copy = {
     admin: "מנהל דומיין",
     adminDesc: "נהלו תפעול, משתמשים וביצועים.",
     continue: "המשך לסביבת העבודה",
-    prototype: "אב-טיפוס לממשק — ללא חיבור למערכת חיה",
+    prototype: "צ׳אט ה-AI לעובדים מחובר לשרת התמיכה · שאר הלוחות מציגים נתוני דוגמה",
     overview: "סקירה",
     aiAssistant: "עוזר חכם",
     myTickets: "הכרטיסים שלי",
@@ -683,14 +687,104 @@ function Shell({
 function EmployeeChat({
   setView,
   language,
+  chat,
 }: {
   setView: (view: View) => void
   language: Language
+  chat: HelpdeskChat
 }) {
   const t = copy[language]
-  const [asked, setAsked] = useState(false)
-  const [draftState, setDraftState] =
-    useState<"ready" | "review" | "approved" | "rejected">("ready")
+  const c = chatCopy[language]
+  const {
+    messages,
+    pendingAction,
+    pendingActionInvalid,
+    diagnostics,
+    busy,
+    error,
+    outcome,
+    failedMessage,
+    email,
+    setEmail,
+  } = chat
+  const [input, setInput] = useState("")
+  const [emailTouched, setEmailTouched] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const asked = messages.length > 0
+  const emailInvalid = email.trim() !== "" && !isEmailValid(email)
+  const showEmailError =
+    emailInvalid && (emailTouched || error?.kind === "email")
+  const draft = useMemo(
+    () => (pendingAction ? extractDraft(pendingAction) : null),
+    [pendingAction],
+  )
+  const draftRows = draft
+    ? ([
+        [c.summary, draft.summary],
+        [c.subject, draft.subject],
+        [c.category, draft.category],
+        [c.priority, draft.priority],
+        [c.department, draft.department],
+        [c.requesterEmail, draft.requesterEmail],
+      ] as const).filter(([, value]) => value)
+    : []
+  const processing = busy === "approve" || busy === "reject"
+  const draftBlocked = busy !== null || !pendingAction
+  const showModal =
+    modalOpen && (pendingAction !== null || outcome?.type === "approved" || outcome?.type === "failed")
+  const rejectedNotice = outcome?.type === "rejected" && !pendingAction
+
+  useEffect(() => {
+    if (
+      modalOpen &&
+      !pendingAction &&
+      outcome?.type !== "approved" &&
+      outcome?.type !== "failed"
+    )
+      setModalOpen(false)
+  }, [modalOpen, pendingAction, outcome])
+
+  const submit = async (text: string) => {
+    setEmailTouched(true)
+    if (await chat.send(text, email)) setInput("")
+  }
+  const decide = async (approved: boolean) => {
+    if (approved) await chat.approve()
+    else await chat.reject()
+  }
+  const errorText = (current: NonNullable<typeof error>) => {
+    if (current.kind === "email") return c.emailInvalid
+    const base =
+      current.kind === "network"
+        ? c.errNetwork
+        : current.kind === "timeout"
+          ? c.errTimeout
+          : current.kind === "http"
+            ? c.errHttp(current.status ?? 0)
+            : c.errInvalid
+    return current.scope === "approval" ? base + c.errApprovalSuffix : base
+  }
+  const emailField = (
+    <div className="email-field">
+      <label htmlFor="work-email">{c.emailLabel}</label>
+      <input
+        id="work-email"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        dir="ltr"
+        value={email}
+        placeholder={c.emailPlaceholder}
+        aria-invalid={showEmailError}
+        aria-describedby="work-email-hint"
+        onChange={(e) => setEmail(e.target.value)}
+        onBlur={() => setEmailTouched(true)}
+      />
+      <small id="work-email-hint" className={showEmailError ? "invalid" : ""}>
+        {showEmailError ? c.emailInvalid : c.emailHint}
+      </small>
+    </div>
+  )
   const suggestions = [
     {
       icon: "lock" as IconName,
@@ -722,7 +816,15 @@ function EmployeeChat({
             <h1>{t.goodMorning}</h1>
             <p>{t.chatSubtitle}</p>
           </div>
-          <button className="secondary-button">
+          <button
+            className="secondary-button"
+            disabled={busy !== null}
+            onClick={() => {
+              chat.reset()
+              setInput("")
+              setModalOpen(false)
+            }}
+          >
             <Icon name="message" size={18} />
             {t.newConversation}
           </button>
@@ -737,23 +839,33 @@ function EmployeeChat({
               Describe what’s happening in your own words. I’ll search Nakhla’s
               verified knowledge base and guide you step by step.
             </p>
+            {emailField}
             <div className="chat-input large">
               <input
                 aria-label={t.askPlaceholder}
                 placeholder={t.askPlaceholder}
-                onKeyDown={(e) => e.key === "Enter" && setAsked(true)}
+                value={input}
+                disabled={busy !== null}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing)
+                    void submit(input)
+                }}
               />
-              <button aria-label="Attach file">
-                <Icon name="paperclip" />
-              </button>
               <button
                 className="send-button"
-                aria-label="Send message"
-                onClick={() => setAsked(true)}
+                aria-label={c.send}
+                disabled={busy !== null || !input.trim()}
+                onClick={() => void submit(input)}
               >
                 <Icon name="send" />
               </button>
             </div>
+            {error?.scope === "chat" && error.kind !== "email" && (
+              <div className="chat-error" role="alert">
+                {errorText(error)}
+              </div>
+            )}
             <div className="suggestion-label">
               <span>{t.suggested}</span>
               <i />
@@ -763,7 +875,8 @@ function EmployeeChat({
                 <button
                   key={item.title}
                   className="suggestion-card"
-                  onClick={() => setAsked(true)}
+                  disabled={busy !== null}
+                  onClick={() => void submit(item.title)}
                 >
                   <span>
                     <Icon name={item.icon} />
@@ -779,72 +892,100 @@ function EmployeeChat({
           </div>
         ) : (
           <div className="conversation">
-            <div className="message-row user-message">
-              <div>
-                <small>You · just now</small>
-                <p>
-                  My VPN keeps disconnecting every few minutes when I work from
-                  home.
-                </p>
-              </div>
-              <span className="avatar mini">LA</span>
-            </div>
-            <div className="message-row ai-message">
-              <span className="bot-avatar">
-                <Icon name="sparkles" size={18} />
-              </span>
-              <div>
-                <small>Nakhla Assistant · just now</small>
-                <div className="message-bubble">
-                  <p>
-                    I found a likely fix. First, let’s refresh your VPN profile:
-                  </p>
-                  <ol>
-                    <li>
-                      Open <strong>GlobalProtect</strong> from your menu bar.
-                    </li>
-                    <li>Select Settings → Refresh Connection.</li>
-                    <li>Reconnect using your Nakhla credentials.</li>
-                  </ol>
-                  <p>
-                    If it still disconnects, I recommend creating a support
-                    ticket so our network team can check your connection logs.
-                  </p>
-                  <div className="citation">
-                    <Icon name="book" size={17} />
-                    <span>
-                      <strong>KB-1042</strong> · VPN connectivity guide
-                    </span>
-                    <span>Updated 6 days ago</span>
+            {messages.map((message) =>
+              message.role === "user" ? (
+                <div key={message.id} className="message-row user-message">
+                  <div>
+                    <small>
+                      {c.you} · {message.time.toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" })}
+                    </small>
+                    <p className="message-text">{message.text}</p>
+                  </div>
+                  <span className="avatar mini">
+                    {(email.trim()[0] || "U").toUpperCase()}
+                  </span>
+                </div>
+              ) : (
+                <div key={message.id} className="message-row ai-message">
+                  <span className="bot-avatar">
+                    <Icon name="sparkles" size={18} />
+                  </span>
+                  <div>
+                    <small>
+                      {c.assistant} · {message.time.toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" })}
+                    </small>
+                    <div className="message-bubble">
+                      <p className="message-text">{message.text}</p>
+                    </div>
+                  </div>
+                </div>
+              ),
+            )}
+            {busy === "chat" && (
+              <div className="message-row ai-message" role="status">
+                <span className="bot-avatar">
+                  <Icon name="sparkles" size={18} />
+                </span>
+                <div>
+                  <div className="message-bubble typing-indicator">
+                    <i />
+                    <i />
+                    <i />
+                    <span>{c.sending}</span>
                   </div>
                 </div>
               </div>
-            </div>
-            {draftState === "rejected" && (
+            )}
+            {error && error.kind !== "email" && (
+              <div className="chat-error" role="alert">
+                <span>{errorText(error)}</span>
+                {error.scope === "chat" && failedMessage && (
+                  <button
+                    disabled={busy !== null}
+                    onClick={() => void chat.send(failedMessage, email)}
+                  >
+                    {c.retry}
+                  </button>
+                )}
+                <button onClick={chat.clearError}>{c.dismiss}</button>
+              </div>
+            )}
+            {pendingActionInvalid && (
+              <div className="chat-error" role="alert">
+                {c.invalidDraft}
+              </div>
+            )}
+            {rejectedNotice && (
               <div className="draft-cancelled" role="status">
                 <span>
                   <Icon name="x" size={16} />
                 </span>
                 <div>
-                  <strong>Ticket draft cancelled</strong>
-                  <p>
-                    No ticket was created. You can continue this conversation.
-                  </p>
+                  <strong>{c.draftCancelled}</strong>
+                  <p>{c.draftCancelledBody}</p>
                 </div>
-                <button onClick={() => setDraftState("ready")}>
-                  Review again
-                </button>
+                <button onClick={chat.clearOutcome}>{c.dismiss}</button>
               </div>
             )}
+            {emailField}
             <div className="chat-input docked">
               <input
-                aria-label={t.askPlaceholder}
-                placeholder="Ask a follow-up question..."
+                aria-label={c.followUp}
+                placeholder={c.followUp}
+                value={input}
+                disabled={busy !== null}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing)
+                    void submit(input)
+                }}
               />
-              <button aria-label="Attach file">
-                <Icon name="paperclip" />
-              </button>
-              <button className="send-button" aria-label="Send message">
+              <button
+                className="send-button"
+                aria-label={c.send}
+                disabled={busy !== null || !input.trim()}
+                onClick={() => void submit(input)}
+              >
                 <Icon name="send" />
               </button>
             </div>
@@ -852,52 +993,54 @@ function EmployeeChat({
         )}
       </section>
       <aside className="chat-side">
-        {asked && draftState !== "rejected" && (
+        {draft && pendingAction && (
           <div className="draft-side-panel">
             <div className="draft-side-top">
               <span className="approval-icon">
                 <Icon name="ticket" />
               </span>
-              <span className="draft-label">AI TICKET DRAFT</span>
+              <span className="draft-label">{c.draftLabel}</span>
             </div>
-            <h2>Ready for your review</h2>
-            <p>
-              Check the proposed ticket before deciding. Nothing is submitted
-              until you explicitly approve it.
-            </p>
+            <h2>{c.draftReady}</h2>
+            <p>{c.draftNote}</p>
             <div className="draft-side-summary">
-              <span>VPN connection drops frequently</span>
-              <div>
-                <small>Network &amp; Connectivity</small>
-                <strong className="priority high">
-                  <i />
-                  High
-                </strong>
-              </div>
-            </div>
-            <div className="draft-side-evidence">
-              <Icon name="sparkles" size={16} />
-              <span>3 relevant details included</span>
+              <span>{draft.title || c.noDraftDetails}</span>
+              {(draft.category || draft.priority) && (
+                <div>
+                  <small>{draft.category}</small>
+                  {draft.priority && (
+                    <strong
+                      className={`priority ${draft.priority.toLowerCase() === "high" ? "high" : ""}`}
+                    >
+                      <i />
+                      {draft.priority}
+                    </strong>
+                  )}
+                </div>
+              )}
             </div>
             <button
               className="primary-button"
-              onClick={() => setDraftState("review")}
+              disabled={busy !== null}
+              onClick={() => setModalOpen(true)}
             >
-              Review draft
+              {c.reviewDraft}
               <Icon name="arrow" size={16} />
             </button>
             <button
               className="text-button"
-              onClick={() => setDraftState("rejected")}
+              disabled={draftBlocked}
+              onClick={() => void decide(false)}
             >
-              Reject without creating
+              {busy === "reject" ? c.rejecting : c.rejectWithout}
             </button>
             <div className="draft-side-safety">
               <Icon name="lock" size={13} />
-              No ticket has been created
+              {c.noTicketYet}
             </div>
           </div>
         )}
+        <DiagnosticsPanel diagnostics={diagnostics} t={c} />
         <div className="side-card ticket-glance">
           <div className="card-title">
             <div>
@@ -944,17 +1087,13 @@ function EmployeeChat({
           </span>
         </div>
       </aside>
-      {(draftState === "review" || draftState === "approved") && (
+      {showModal && (
         <div
           className="draft-modal-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (
-              event.target === event.currentTarget &&
-              draftState === "review"
-            ) {
-              setDraftState("ready")
-            }
+            if (event.target === event.currentTarget && !processing)
+              setModalOpen(false)
           }}
         >
           <section
@@ -963,7 +1102,7 @@ function EmployeeChat({
             aria-modal="true"
             aria-labelledby="draft-modal-title"
           >
-            {draftState === "review" ? (
+            {pendingAction && draft && outcome?.type !== "approved" ? (
               <>
                 <header className="draft-modal-header">
                   <div>
@@ -971,14 +1110,15 @@ function EmployeeChat({
                       <Icon name="ticket" />
                     </span>
                     <div>
-                      <span className="kicker">REVIEW BEFORE SUBMITTING</span>
-                      <h2 id="draft-modal-title">Review ticket draft</h2>
+                      <span className="kicker">{c.reviewKicker}</span>
+                      <h2 id="draft-modal-title">{c.reviewTitle}</h2>
                     </div>
                   </div>
                   <button
                     className="modal-close"
-                    onClick={() => setDraftState("ready")}
-                    aria-label="Close ticket draft"
+                    disabled={processing}
+                    onClick={() => setModalOpen(false)}
+                    aria-label={c.closeDraft}
                   >
                     <Icon name="x" />
                   </button>
@@ -986,129 +1126,121 @@ function EmployeeChat({
                 <div className="draft-safety-note">
                   <Icon name="shield" size={18} />
                   <p>
-                    <strong>Nothing has been created yet.</strong> Review the
-                    proposed details below, then explicitly approve or reject
-                    this draft.
+                    <strong>{c.notCreatedNote}</strong> {c.notCreatedBody}
                   </p>
                 </div>
+                {error?.scope === "approval" && (
+                  <div className="chat-error modal-error" role="alert">
+                    {errorText(error)}
+                  </div>
+                )}
+                {outcome?.type === "failed" && outcome.result !== null && (
+                  <div className="chat-error modal-error" role="alert">
+                    <div>
+                      <strong>{c.failedTitle}</strong>
+                      <DataBlock value={outcome.result} />
+                    </div>
+                  </div>
+                )}
                 <div className="draft-fields">
-                  <div className="draft-field draft-field-wide">
-                    <span>Proposed title</span>
-                    <strong>VPN connection drops frequently</strong>
-                  </div>
-                  <div className="draft-field draft-field-wide">
-                    <span>Description</span>
-                    <p>
-                      VPN disconnects every few minutes while working remotely.
-                      Restarting the laptop and router did not resolve the
-                      issue, and the behavior also occurs on a mobile hotspot.
-                    </p>
-                  </div>
-                  <div className="draft-field">
-                    <span>Category</span>
-                    <strong>Network &amp; Connectivity</strong>
-                  </div>
-                  <div className="draft-field">
-                    <span>Priority</span>
-                    <strong className="priority high">
-                      <i />
-                      High
-                    </strong>
-                  </div>
-                </div>
-                <div className="draft-evidence">
-                  <div className="section-title">
-                    <div>
-                      <h2>Relevant evidence</h2>
-                      <p>Included from this AI conversation</p>
+                  {draft.title && (
+                    <div className="draft-field draft-field-wide">
+                      <span>{c.proposedTitle}</span>
+                      <strong>{draft.title}</strong>
                     </div>
-                    <span>3 items</span>
-                  </div>
-                  <div className="evidence-list">
-                    <div>
-                      <span className="evidence-icon">
-                        <Icon name="message" size={17} />
-                      </span>
-                      <p>
-                        <strong>User report</strong>
-                        <small>Disconnects every few minutes from home</small>
+                  )}
+                  {draft.description && (
+                    <div className="draft-field draft-field-wide">
+                      <span>{c.description}</span>
+                      <p className="message-text">{draft.description}</p>
+                    </div>
+                  )}
+                  {draftRows
+                    .filter(([, value]) => value !== draft.title)
+                    .map(([label, value]) => (
+                      <div className="draft-field" key={label}>
+                        <span>{label}</span>
+                        <strong>{value}</strong>
+                      </div>
+                    ))}
+                  {draft.attemptedSteps.length > 0 && (
+                    <div className="draft-field draft-field-wide">
+                      <span>{c.attemptedSteps}</span>
+                      <ul className="draft-bullets">
+                        {draft.attemptedSteps.map((step, index) => (
+                          <li key={index}>{step}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {draft.kbReferences.length > 0 && (
+                    <div className="draft-field draft-field-wide">
+                      <span>{c.kbReferences}</span>
+                      <ul className="draft-bullets">
+                        {draft.kbReferences.map((reference, index) => (
+                          <li key={index}>{reference}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {!draft.title &&
+                    !draft.description &&
+                    draftRows.length === 0 &&
+                    draft.attemptedSteps.length === 0 &&
+                    draft.kbReferences.length === 0 && (
+                      <p className="draft-field draft-field-wide">
+                        {c.noDraftDetails}
                       </p>
-                      <Icon name="check" size={16} />
-                    </div>
-                    <div>
-                      <span className="evidence-icon">
-                        <Icon name="laptop" size={17} />
-                      </span>
-                      <p>
-                        <strong>Troubleshooting attempted</strong>
-                        <small>Laptop and router restarted</small>
-                      </p>
-                      <Icon name="check" size={16} />
-                    </div>
-                    <div>
-                      <span className="evidence-icon">
-                        <Icon name="book" size={17} />
-                      </span>
-                      <p>
-                        <strong>Knowledge-base reference</strong>
-                        <small>KB-1042 · VPN connectivity guide</small>
-                      </p>
-                      <Icon name="check" size={16} />
-                    </div>
-                  </div>
+                    )}
                 </div>
                 <footer className="draft-modal-actions">
                   <button
                     className="reject-button"
-                    onClick={() => setDraftState("rejected")}
+                    disabled={draftBlocked}
+                    onClick={() => void decide(false)}
                   >
                     <Icon name="x" size={17} />
-                    Reject draft
+                    {busy === "reject" ? c.rejecting : c.reject}
                   </button>
                   <button
                     className="approve-button"
-                    onClick={() => setDraftState("approved")}
+                    disabled={draftBlocked}
+                    onClick={() => void decide(true)}
                   >
                     <Icon name="check" size={17} />
-                    Approve ticket
+                    {busy === "approve" ? c.approving : c.approve}
                   </button>
                 </footer>
               </>
             ) : (
               <div className="draft-confirmation">
                 <span className="confirmation-mark">
-                  <Icon name="check" size={29} />
+                  <Icon name={outcome?.type === "failed" ? "x" : "check"} size={29} />
                 </span>
-                <span className="demo-label">DEMO CONFIRMATION</span>
-                <h2 id="draft-modal-title">Ticket approved</h2>
+                <h2 id="draft-modal-title">
+                  {outcome?.type === "failed" ? c.failedTitle : c.approvedTitle}
+                </h2>
                 <p>
-                  This prototype has not contacted a backend or created a real
-                  ticket. The ID and tracking link below are demonstration data.
+                  {outcome?.type === "failed" ? c.failedBody : c.approvedBody}
                 </p>
-                <div className="demo-ticket-id">
-                  <span>Demo ticket ID</span>
-                  <strong>DEMO-IT-2948</strong>
-                </div>
-                <a
-                  className="demo-tracking-link"
-                  href="#demo-ticket-DEMO-IT-2948"
-                >
-                  <Icon name="ticket" size={17} />
-                  Demo tracking link
-                  <Icon name="arrow" size={16} />
-                </a>
-                <small>
-                  Connect this action to the FastAPI backend to generate and
-                  track real tickets.
-                </small>
+                {outcome && findTicketId(outcome.result) && (
+                  <div className="demo-ticket-id">
+                    <span>{c.ticketId}</span>
+                    <strong dir="ltr">{findTicketId(outcome.result)}</strong>
+                  </div>
+                )}
+                {outcome?.reply && <p className="message-text">{outcome.reply}</p>}
+                {outcome && outcome.result !== null && (
+                  <DataBlock value={outcome.result} />
+                )}
                 <button
                   className="primary-button confirmation-done"
                   onClick={() => {
-                    setDraftState("ready")
-                    setAsked(false)
+                    setModalOpen(false)
+                    chat.clearOutcome()
                   }}
                 >
-                  Done
+                  {c.done}
                 </button>
               </div>
             )}
@@ -1976,7 +2108,7 @@ export default function App() {
   const [language, setLanguage] = useState<Language>("en")
   const [role, setRole] = useState<Role | null>(null)
   const [view, setView] = useState<View>("chat")
-
+  const chat = useHelpdeskChat()
   useEffect(() => {
     document.documentElement.lang = language
     document.documentElement.dir = language === "en" ? "ltr" : "rtl"
@@ -2005,7 +2137,7 @@ export default function App() {
 
   let screen: React.ReactNode
   if (view === "chat")
-    screen = <EmployeeChat setView={setView} language={language} />
+    screen = <EmployeeChat setView={setView} language={language} chat={chat} />
   else if (view === "tickets")
     screen = <TicketsPage setView={setView} supportMode={role === "support"} />
   else if (view === "ticket")
