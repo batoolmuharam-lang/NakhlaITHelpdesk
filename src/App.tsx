@@ -123,7 +123,7 @@ const tickets = [
   },
 ]
 
-function Icon({ name, size = 20 }: { name: IconName size?: number }) {
+function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
     arrow: (
       <>
@@ -415,7 +415,7 @@ function Login({
 }) {
   const [role, setRole] = useState<Role>("employee")
   const t = copy[language]
-  const roles: { key: Role icon: IconName title: string desc: string }[] = [
+  const roles: { key: Role; icon: IconName; title: string; desc: string }[] = [
     { key: "employee", icon: "user", title: t.employee, desc: t.employeeDesc },
     { key: "support", icon: "headset", title: t.support, desc: t.supportDesc },
     { key: "admin", icon: "shield", title: t.admin, desc: t.adminDesc },

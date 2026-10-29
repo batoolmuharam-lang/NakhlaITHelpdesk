@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from "react"
 
 export type AppLanguage = "en" | "ar" | "he"
 
-type Translation = { ar: string he: string }
+type Translation = { ar: string; he: string }
 
 const catalog: Record<string, Translation> = {
   "IT HELPDESK": { ar: "مكتب دعم تقنية المعلومات", he: "מוקד תמיכת IT" },
