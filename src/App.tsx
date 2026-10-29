@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
 import { LocalizedContent } from "./i18n"
 import { extractDraft, findTicketId, isEmailValid } from "./api"
+import { computeStats, type TicketRow } from "./tickets"
+import { useTickets } from "./useTickets"
 import { chatCopy } from "./chatCopy"
 import DiagnosticsPanel, { DataBlock } from "./DiagnosticsPanel"
 import { useHelpdeskChat, type HelpdeskChat } from "./useHelpdeskChat"
@@ -709,7 +711,7 @@ function EmployeeChat({
   } = chat
   const [input, setInput] = useState("")
   const [emailTouched, setEmailTouched] = useState(false)
-  const [modalOpen, setModalOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const asked = messages.length > 0
   const emailInvalid = email.trim() !== "" && !isEmailValid(email)
   const showEmailError =
@@ -718,31 +720,13 @@ function EmployeeChat({
     () => (pendingAction ? extractDraft(pendingAction) : null),
     [pendingAction],
   )
-  const draftRows = draft
-    ? ([
-        [c.summary, draft.summary],
-        [c.subject, draft.subject],
-        [c.category, draft.category],
-        [c.priority, draft.priority],
-        [c.department, draft.department],
-        [c.requesterEmail, draft.requesterEmail],
-      ] as const).filter(([, value]) => value)
-    : []
-  const processing = busy === "approve" || busy === "reject"
   const draftBlocked = busy !== null || !pendingAction
-  const showModal =
-    modalOpen && (pendingAction !== null || outcome?.type === "approved" || outcome?.type === "failed")
   const rejectedNotice = outcome?.type === "rejected" && !pendingAction
-
-  useEffect(() => {
-    if (
-      modalOpen &&
-      !pendingAction &&
-      outcome?.type !== "approved" &&
-      outcome?.type !== "failed"
-    )
-      setModalOpen(false)
-  }, [modalOpen, pendingAction, outcome])
+  const createdTicketId =
+    outcome?.type === "approved" ? findTicketId(outcome.result) : ""
+  // Collapse the details again whenever a different draft is shown.
+  const draftId = pendingAction?.action_id
+  useEffect(() => setDetailsOpen(false), [draftId])
 
   const submit = async (text: string) => {
     setEmailTouched(true)
@@ -822,7 +806,6 @@ function EmployeeChat({
             onClick={() => {
               chat.reset()
               setInput("")
-              setModalOpen(false)
             }}
           >
             <Icon name="message" size={18} />
@@ -968,6 +951,102 @@ function EmployeeChat({
               </div>
             )}
             {emailField}
+            {draft && pendingAction && (
+              <section
+                className="ticket-card"
+                aria-labelledby="ticket-card-title"
+                aria-busy={busy === "approve" || busy === "reject"}
+              >
+                <header>
+                  <span className="soft-icon">
+                    <Icon name="ticket" size={16} />
+                  </span>
+                  <h3 id="ticket-card-title">{c.pendingTitle}</h3>
+                  <button
+                    className="ticket-card-toggle"
+                    aria-expanded={detailsOpen}
+                    onClick={() => setDetailsOpen((open) => !open)}
+                  >
+                    {detailsOpen ? c.hideDetails : c.showDetails}
+                  </button>
+                </header>
+                <strong className="ticket-card-subject">
+                  {draft.subject || draft.title || c.noDraftDetails}
+                </strong>
+                <div className="ticket-card-meta">
+                  {draft.category && <span>{draft.category}</span>}
+                  {draft.priority && (
+                    <span className="priority">
+                      <i />
+                      {draft.priority}
+                    </span>
+                  )}
+                  {draft.requesterEmail && (
+                    <span dir="ltr">{draft.requesterEmail}</span>
+                  )}
+                </div>
+                {(draft.description || draft.attemptedSteps.length > 0) && (
+                  <p className={`ticket-card-summary${detailsOpen ? " open" : ""}`}>
+                    {draft.description}
+                    {draft.attemptedSteps.length > 0 &&
+                      ` ${c.attemptedSteps}: ${draft.attemptedSteps.join("; ")}.`}
+                  </p>
+                )}
+                {detailsOpen && (
+                  <dl className="ticket-card-details">
+                    {draft.department && (
+                      <>
+                        <dt>{c.department}</dt>
+                        <dd>{draft.department}</dd>
+                      </>
+                    )}
+                    {draft.kbReferences.length > 0 && (
+                      <>
+                        <dt>{c.kbReferences}</dt>
+                        <dd>{draft.kbReferences.join(", ")}</dd>
+                      </>
+                    )}
+                  </dl>
+                )}
+                {outcome?.type === "failed" && (
+                  <div className="chat-error" role="alert">
+                    {c.failedTitle}. {c.errApprovalSuffix.trim()}
+                  </div>
+                )}
+                <footer>
+                  <button
+                    className="approve-button"
+                    disabled={draftBlocked}
+                    onClick={() => void decide(true)}
+                  >
+                    <Icon name="check" size={16} />
+                    {busy === "approve" ? c.approving : c.approve}
+                  </button>
+                  <button
+                    className="reject-button"
+                    disabled={draftBlocked}
+                    onClick={() => void decide(false)}
+                  >
+                    <Icon name="x" size={16} />
+                    {busy === "reject" ? c.rejecting : c.reject}
+                  </button>
+                </footer>
+              </section>
+            )}
+            {!pendingAction && createdTicketId && (
+              <div className="draft-cancelled ticket-created" role="status">
+                <span>
+                  <Icon name="check" size={16} />
+                </span>
+                <div>
+                  <strong>
+                    {c.approvedTitle}: <span dir="ltr">{createdTicketId}</span>
+                  </strong>
+                  <p>{c.approvedBody}</p>
+                </div>
+                <button onClick={chat.clearOutcome}>{c.dismiss}</button>
+              </div>
+            )}
             <div className="chat-input docked">
               <input
                 aria-label={c.followUp}
@@ -993,53 +1072,6 @@ function EmployeeChat({
         )}
       </section>
       <aside className="chat-side">
-        {draft && pendingAction && (
-          <div className="draft-side-panel">
-            <div className="draft-side-top">
-              <span className="approval-icon">
-                <Icon name="ticket" />
-              </span>
-              <span className="draft-label">{c.draftLabel}</span>
-            </div>
-            <h2>{c.draftReady}</h2>
-            <p>{c.draftNote}</p>
-            <div className="draft-side-summary">
-              <span>{draft.title || c.noDraftDetails}</span>
-              {(draft.category || draft.priority) && (
-                <div>
-                  <small>{draft.category}</small>
-                  {draft.priority && (
-                    <strong
-                      className={`priority ${draft.priority.toLowerCase() === "high" ? "high" : ""}`}
-                    >
-                      <i />
-                      {draft.priority}
-                    </strong>
-                  )}
-                </div>
-              )}
-            </div>
-            <button
-              className="primary-button"
-              disabled={busy !== null}
-              onClick={() => setModalOpen(true)}
-            >
-              {c.reviewDraft}
-              <Icon name="arrow" size={16} />
-            </button>
-            <button
-              className="text-button"
-              disabled={draftBlocked}
-              onClick={() => void decide(false)}
-            >
-              {busy === "reject" ? c.rejecting : c.rejectWithout}
-            </button>
-            <div className="draft-side-safety">
-              <Icon name="lock" size={13} />
-              {c.noTicketYet}
-            </div>
-          </div>
-        )}
         <DiagnosticsPanel diagnostics={diagnostics} t={c} />
         <div className="side-card ticket-glance">
           <div className="card-title">
@@ -1087,166 +1119,6 @@ function EmployeeChat({
           </span>
         </div>
       </aside>
-      {showModal && (
-        <div
-          className="draft-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !processing)
-              setModalOpen(false)
-          }}
-        >
-          <section
-            className="draft-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="draft-modal-title"
-          >
-            {pendingAction && draft && outcome?.type !== "approved" ? (
-              <>
-                <header className="draft-modal-header">
-                  <div>
-                    <span className="draft-modal-icon">
-                      <Icon name="ticket" />
-                    </span>
-                    <div>
-                      <span className="kicker">{c.reviewKicker}</span>
-                      <h2 id="draft-modal-title">{c.reviewTitle}</h2>
-                    </div>
-                  </div>
-                  <button
-                    className="modal-close"
-                    disabled={processing}
-                    onClick={() => setModalOpen(false)}
-                    aria-label={c.closeDraft}
-                  >
-                    <Icon name="x" />
-                  </button>
-                </header>
-                <div className="draft-safety-note">
-                  <Icon name="shield" size={18} />
-                  <p>
-                    <strong>{c.notCreatedNote}</strong> {c.notCreatedBody}
-                  </p>
-                </div>
-                {error?.scope === "approval" && (
-                  <div className="chat-error modal-error" role="alert">
-                    {errorText(error)}
-                  </div>
-                )}
-                {outcome?.type === "failed" && outcome.result !== null && (
-                  <div className="chat-error modal-error" role="alert">
-                    <div>
-                      <strong>{c.failedTitle}</strong>
-                      <DataBlock value={outcome.result} />
-                    </div>
-                  </div>
-                )}
-                <div className="draft-fields">
-                  {draft.title && (
-                    <div className="draft-field draft-field-wide">
-                      <span>{c.proposedTitle}</span>
-                      <strong>{draft.title}</strong>
-                    </div>
-                  )}
-                  {draft.description && (
-                    <div className="draft-field draft-field-wide">
-                      <span>{c.description}</span>
-                      <p className="message-text">{draft.description}</p>
-                    </div>
-                  )}
-                  {draftRows
-                    .filter(([, value]) => value !== draft.title)
-                    .map(([label, value]) => (
-                      <div className="draft-field" key={label}>
-                        <span>{label}</span>
-                        <strong>{value}</strong>
-                      </div>
-                    ))}
-                  {draft.attemptedSteps.length > 0 && (
-                    <div className="draft-field draft-field-wide">
-                      <span>{c.attemptedSteps}</span>
-                      <ul className="draft-bullets">
-                        {draft.attemptedSteps.map((step, index) => (
-                          <li key={index}>{step}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {draft.kbReferences.length > 0 && (
-                    <div className="draft-field draft-field-wide">
-                      <span>{c.kbReferences}</span>
-                      <ul className="draft-bullets">
-                        {draft.kbReferences.map((reference, index) => (
-                          <li key={index}>{reference}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {!draft.title &&
-                    !draft.description &&
-                    draftRows.length === 0 &&
-                    draft.attemptedSteps.length === 0 &&
-                    draft.kbReferences.length === 0 && (
-                      <p className="draft-field draft-field-wide">
-                        {c.noDraftDetails}
-                      </p>
-                    )}
-                </div>
-                <footer className="draft-modal-actions">
-                  <button
-                    className="reject-button"
-                    disabled={draftBlocked}
-                    onClick={() => void decide(false)}
-                  >
-                    <Icon name="x" size={17} />
-                    {busy === "reject" ? c.rejecting : c.reject}
-                  </button>
-                  <button
-                    className="approve-button"
-                    disabled={draftBlocked}
-                    onClick={() => void decide(true)}
-                  >
-                    <Icon name="check" size={17} />
-                    {busy === "approve" ? c.approving : c.approve}
-                  </button>
-                </footer>
-              </>
-            ) : (
-              <div className="draft-confirmation">
-                <span className="confirmation-mark">
-                  <Icon name={outcome?.type === "failed" ? "x" : "check"} size={29} />
-                </span>
-                <h2 id="draft-modal-title">
-                  {outcome?.type === "failed" ? c.failedTitle : c.approvedTitle}
-                </h2>
-                <p>
-                  {outcome?.type === "failed" ? c.failedBody : c.approvedBody}
-                </p>
-                {outcome && findTicketId(outcome.result) && (
-                  <div className="demo-ticket-id">
-                    <span>{c.ticketId}</span>
-                    <strong dir="ltr">{findTicketId(outcome.result)}</strong>
-                  </div>
-                )}
-                {outcome?.reply && <p className="message-text">{outcome.reply}</p>}
-                {outcome && outcome.result !== null && (
-                  <DataBlock value={outcome.result} />
-                )}
-                <button
-                  className="primary-button confirmation-done"
-                  onClick={() => {
-                    setModalOpen(false)
-                    chat.clearOutcome()
-                  }}
-                >
-                  {c.done}
-                </button>
-              </div>
-            )}
-          </section>
-        </div>
-      )}
     </div>
   )
 }
@@ -1254,15 +1126,48 @@ function EmployeeChat({
 function TicketsPage({
   setView,
   supportMode = false,
+  live,
+  hasEmail,
+  onRefresh,
 }: {
   setView: (view: View) => void
   supportMode?: boolean
+  live: ReturnType<typeof useTickets>
+  hasEmail: boolean
+  onRefresh: () => void
 }) {
   const [filter, setFilter] = useState("All")
+  // Employees see their real tickets; the support queue is still demo data.
+  const useLive = !supportMode
+  const rows: TicketRow[] = useLive ? (live.list?.tickets ?? []) : tickets
+  const stats = live.list ? computeStats(live.list) : null
+  const statCards: string[][] = useLive
+    ? [
+        [stats ? String(stats.total) : "–", "Total tickets", "ticket"],
+        [stats ? String(stats.open) : "–", "Open", "clock"],
+        [stats ? String(stats.resolved) : "–", "Resolved", "check"],
+        [stats ? String(stats.closed) : "–", "Closed", "x"],
+      ]
+    : [
+        ["8", "Total tickets", "ticket"],
+        ["1", "In progress", "clock"],
+        ["1", "Waiting on you", "message"],
+        ["2", "Resolved", "check"],
+      ]
+  const tabs = useLive
+    ? ["All", "Open", "Resolved", "Closed"]
+    : ["All", "In progress", "Waiting", "Resolved"]
   const visible =
-    filter === "All"
-      ? tickets
-      : tickets.filter((ticket) => ticket.status === filter)
+    filter === "All" ? rows : rows.filter((ticket) => ticket.status === filter)
+  const emptyMessage = !useLive
+    ? ""
+    : !hasEmail
+      ? "Enter your work email in the chat to see your tickets."
+      : live.status === "loading"
+        ? "Loading your tickets…"
+        : live.status === "error"
+          ? "Could not load your tickets. Check that the email is a verified Nakhla address and try again."
+          : "You have no tickets yet."
   return (
     <div>
       <div className="page-heading">
@@ -1285,18 +1190,13 @@ function TicketsPage({
         )}
       </div>
       <div className="ticket-stats">
-        {[
-          ["4", "Total tickets", "ticket"],
-          ["1", "In progress", "clock"],
-          ["1", "Waiting on you", "message"],
-          ["2", "Resolved", "check"],
-        ].map(([value, label, icon], index) => (
+        {statCards.map(([value, label, icon], index) => (
           <div className="mini-stat" key={label}>
             <span className={`stat-icon stat-${index}`}>
               <Icon name={icon as IconName} />
             </span>
             <div>
-              <strong>{supportMode && index === 0 ? "8" : value}</strong>
+              <strong>{value}</strong>
               <small>{label}</small>
             </div>
           </div>
@@ -1312,7 +1212,7 @@ function TicketsPage({
             />
           </div>
           <div className="filter-tabs">
-            {["All", "In progress", "Waiting", "Resolved"].map((item) => (
+            {tabs.map((item) => (
               <button
                 key={item}
                 className={filter === item ? "active" : ""}
@@ -1322,9 +1222,9 @@ function TicketsPage({
               </button>
             ))}
           </div>
-          <button className="filter-button">
+          <button className="filter-button" onClick={useLive ? onRefresh : undefined}>
             <Icon name="filter" size={17} />
-            Filters
+            {useLive ? "Refresh" : "Filters"}
           </button>
         </div>
         <div className="table-wrap">
@@ -1340,10 +1240,15 @@ function TicketsPage({
               </tr>
             </thead>
             <tbody>
+              {useLive && visible.length === 0 && (
+                <tr>
+                  <td colSpan={6}>{emptyMessage}</td>
+                </tr>
+              )}
               {visible.map((ticket) => (
                 <tr
                   key={ticket.id}
-                  onClick={() => setView("ticket")}
+                  onClick={useLive ? undefined : () => setView("ticket")}
                   tabIndex={0}
                 >
                   <td>
@@ -2109,6 +2014,7 @@ export default function App() {
   const [role, setRole] = useState<Role | null>(null)
   const [view, setView] = useState<View>("chat")
   const chat = useHelpdeskChat()
+  const liveTickets = useTickets(chat.email, chat.outcome)
   useEffect(() => {
     document.documentElement.lang = language
     document.documentElement.dir = language === "en" ? "ltr" : "rtl"
@@ -2139,7 +2045,15 @@ export default function App() {
   if (view === "chat")
     screen = <EmployeeChat setView={setView} language={language} chat={chat} />
   else if (view === "tickets")
-    screen = <TicketsPage setView={setView} supportMode={role === "support"} />
+    screen = (
+      <TicketsPage
+        setView={setView}
+        supportMode={role === "support"}
+        live={liveTickets}
+        hasEmail={chat.email.trim() !== ""}
+        onRefresh={() => void liveTickets.refresh()}
+      />
+    )
   else if (view === "ticket")
     screen = <TicketDetail setView={setView} supportMode={role === "support"} />
   else if (view === "support") screen = <SupportDashboard setView={setView} />

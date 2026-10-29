@@ -5,13 +5,14 @@ import {
   isEmailValid,
   postApprove,
   postChat,
-  resultIndicatesFailure,
+  approvalOutcomeType,
   type ApiErrorKind,
   type Citation,
   type HelpdeskResponse,
   type PendingAction,
   type ToolCall,
 } from "./api"
+import { nextPendingAction } from "./tickets"
 
 export interface ChatMessage {
   id: number
@@ -69,8 +70,13 @@ export function useHelpdeskChat() {
     ])
   }, [])
 
-  const applyResponse = useCallback((response: HelpdeskResponse) => {
-    setPendingAction(response.pendingAction)
+  // The backend returns a draft only on the turn that creates it and keeps it until it is
+  // decided, so an ordinary chat reply must not clear a draft that is still pending.
+  const applyResponse = useCallback(
+    (response: HelpdeskResponse, keepUndecided = false) => {
+    setPendingAction((current) =>
+      nextPendingAction(current, response.pendingAction, keepUndecided),
+    )
     setPendingActionInvalid(response.pendingActionInvalid)
     setDiagnostics({
       citations: response.citations,
@@ -78,7 +84,9 @@ export function useHelpdeskChat() {
       result: response.result,
       state: response.state,
     })
-  }, [])
+    },
+    [],
+  )
 
   const toError = (scope: ChatError["scope"], caught: unknown): ChatError =>
     caught instanceof ApiError
@@ -108,7 +116,7 @@ export function useHelpdeskChat() {
           ...(email ? { user: { email } } : {}),
         })
         if (response.reply) addMessage("assistant", response.reply)
-        applyResponse(response)
+        applyResponse(response, true)
         return true
       } catch (caught) {
         setError(toError("chat", caught))
@@ -137,9 +145,12 @@ export function useHelpdeskChat() {
         })
         if (response.reply) addMessage("assistant", response.reply)
         applyResponse(response)
-        const failed = approved && resultIndicatesFailure(response.result)
+        const type = approvalOutcomeType(response, approved)
+        // A failed creation can be retried with the same approved action.
+        if (response.state === "ticket_creation_failed")
+          setPendingAction(pendingAction)
         setOutcome({
-          type: failed ? "failed" : approved ? "approved" : "rejected",
+          type,
           result: response.result,
           reply: response.reply,
         })

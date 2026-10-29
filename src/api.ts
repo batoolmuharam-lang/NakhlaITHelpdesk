@@ -1,3 +1,5 @@
+import { normalizeTicketList, type TicketList } from "./tickets"
+
 const DEFAULT_API_BASE_URL = "http://localhost:8000"
 
 export const API_BASE_URL = (
@@ -199,6 +201,35 @@ export async function postApprove(
   return normalizeResponse(await postJson("/api/approve", request))
 }
 
+// Read-only list of the requester's tickets from the backend (never creates).
+export async function fetchTickets(email: string): Promise<TicketList> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/tickets?requester_email=${encodeURIComponent(email)}`,
+      { signal: controller.signal },
+    )
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError")
+      throw new ApiError("timeout")
+    throw new ApiError("network")
+  } finally {
+    clearTimeout(timer)
+  }
+  if (!response.ok) throw new ApiError("http", response.status)
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    throw new ApiError("invalid")
+  }
+  const list = normalizeTicketList(body)
+  if (!list) throw new ApiError("invalid")
+  return list
+}
+
 const DRAFT_CONTAINERS = [
   "payload",
   "args",
@@ -270,6 +301,26 @@ export function resultIndicatesFailure(result: unknown): boolean {
   if (!isBlank(result.error)) return true
   const status = asText(result.status).toLowerCase()
   return ["error", "failed", "failure"].includes(status)
+}
+
+// The backend confirms creation with state "ticket_created" (or "already_approved"
+// on an idempotent repeat) plus result.ticket_id. HTTP 200 alone proves nothing.
+export function approvalOutcomeType(
+  response: HelpdeskResponse,
+  approved: boolean,
+): "approved" | "rejected" | "failed" {
+  const state = typeof response.state === "string" ? response.state : ""
+  if (!approved)
+    return state === "rejected" || state === "already_rejected"
+      ? "rejected"
+      : "failed"
+  const hasTicket = findTicketId(response.result) !== ""
+  const created =
+    state === "ticket_created" ||
+    (state === "already_approved" && hasTicket)
+  return created && hasTicket && !resultIndicatesFailure(response.result)
+    ? "approved"
+    : "failed"
 }
 
 export function findTicketId(result: unknown): string {

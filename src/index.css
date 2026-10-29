@@ -238,6 +238,23 @@
 .draft-cancelled p { color: var(--muted); margin: 3px 0 0; }
 .draft-cancelled button { border: 0; background: transparent; color: var(--teal); font-size: 8px; font-weight: 700; }
 .chat-input.docked { margin-inline-start: 42px; }
+.draft-cancelled.ticket-created { border-color: #bfdccf; background: #f4faf8; }
+.draft-cancelled.ticket-created > span { color: var(--forest); background: #dcefe7; }
+.ticket-card { margin: 12px 0 10px 42px; padding: 13px 15px; border: 1px solid #d9c8bb; border-radius: 16px; background: linear-gradient(150deg, rgba(255,255,255,.98), rgba(252,237,227,.9)); box-shadow: 0 8px 22px rgba(41,73,63,.08); }
+.ticket-card > header { display: flex; align-items: center; gap: 8px; }
+.ticket-card > header h3 { flex: 1; margin: 0; color: var(--forest); font-size: 11px; }
+.ticket-card-toggle { border: 0; background: transparent; color: var(--teal); font-size: 9px; font-weight: 700; }
+.ticket-card-subject { display: block; margin: 9px 0 5px; color: var(--forest); font-size: 11px; }
+.ticket-card-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; color: var(--muted); font-size: 9px; }
+.ticket-card-summary { margin: 7px 0 0; color: #52625e; font-size: 9px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ticket-card-summary.open { display: block; overflow: visible; }
+.ticket-card-details { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; font-size: 9px; }
+.ticket-card-details dt { color: var(--muted); }
+.ticket-card-details dd { margin: 0; color: var(--forest); font-weight: 700; }
+.ticket-card > footer { display: flex; gap: 8px; margin-top: 11px; }
+.ticket-card > footer button { flex: 1; min-height: 36px; font-size: 9px; }
+.ticket-card .chat-error { margin: 8px 0 0; }
+@media (max-width: 760px) { .ticket-card { margin-inline-start: 0; } }
 .draft-modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 22px; background: rgba(7, 35, 29, .58); backdrop-filter: blur(7px); animation: modal-fade .18s ease-out; }
 .draft-modal { width: min(620px, 100%); max-height: calc(100vh - 44px); overflow-y: auto; border: 1px solid rgba(255,255,255,.7); border-radius: 22px; background: #fff; box-shadow: 0 30px 90px rgba(5, 32, 26, .28); animation: modal-rise .24s ease-out; }
 .draft-modal-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 23px 24px 18px; border-bottom: 1px solid var(--line); }
